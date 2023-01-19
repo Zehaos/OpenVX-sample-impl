@@ -14,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #if defined(EXPERIMENTAL_USE_DOT)
 
 #include "vx_internal.h"
@@ -108,6 +107,7 @@ VX_API_ENTRY vx_status VX_API_CALL vxExportGraphToDot(vx_graph graph, vx_char do
                 {
                     /* for each head, start tracing the graph */
                     vx_node_t *node = graph->nodes[next_nodes[n]];
+                    node->visited = vx_true_e;
 
                     if (graph->nodes[next_nodes[n]]->executed == vx_true_e) continue;
 
@@ -151,10 +151,54 @@ VX_API_ENTRY vx_status VX_API_CALL vxExportGraphToDot(vx_graph graph, vx_char do
                         }
                     }
                 }
+                memset(last_nodes, 0, VX_INT_MAX_REF);
                 memcpy(last_nodes, next_nodes, num_next * sizeof(next_nodes[0]));
                 num_last = num_next;
                 num_next = 0;
-                ownFindNextNodes(graph, last_nodes, num_last, next_nodes, &num_next, left_nodes, &num_left);
+                vx_uint32 poss_next[VX_INT_MAX_REF];
+                vx_uint32 n1,numPoss=0;
+                // ownFindNextNodes(graph, last_nodes, num_last, next_nodes, &num_next, left_nodes, &num_left);
+                /* for each last node, add all output to input nodes to the list of possible. */
+                for (int i = 0; i < num_last; i++)
+                {
+                    n = last_nodes[i];
+                    for (p = 0; p < graph->nodes[n]->kernel->signature.num_parameters; p++)
+                    {
+                        vx_enum dir = graph->nodes[n]->kernel->signature.directions[p];
+                        vx_reference_t *ref =  graph->nodes[n]->parameters[p];
+                        if (((dir == VX_OUTPUT) || (dir == VX_BIDIRECTIONAL)) && (ref != NULL))
+                        {
+                            /* send the max possible nodes */
+                            n1 = dimof(poss_next) - numPoss;
+                            if (ownFindNodesWithReference(graph, ref, &poss_next[numPoss], &n1, VX_INPUT) == VX_SUCCESS)
+                            {
+                                VX_PRINT(VX_ZONE_GRAPH, "Adding %u nodes to possible list\n", n1);
+                                numPoss += n1;
+                            }
+                        }
+                    }
+                }
+
+                // remove redundant
+                vx_uint32 unique_poss_next[VX_INT_MAX_REF];
+                vx_uint32 num_unique_poss = 0;
+                vx_bool is_unique = vx_true_e;
+                for(vx_uint32 i=0; i < numPoss ; i++){
+                    for(vx_uint32 j=0; j < num_unique_poss ; j++){
+                        if(poss_next[i] == unique_poss_next[j]) is_unique = vx_false_e;
+                    }
+                    if(is_unique && graph->nodes[poss_next[i]]->visited == vx_false_e){
+                        unique_poss_next[num_unique_poss] = poss_next[i];
+                        num_unique_poss += 1;
+                    }
+                    else{
+                        is_unique = vx_true_e;
+                    }
+                }
+
+                memset(next_nodes, 0, VX_INT_MAX_REF);
+                memcpy(next_nodes, unique_poss_next, num_unique_poss * sizeof(unique_poss_next[0]));
+                num_next = num_unique_poss;
             } while (num_next > 0);
             ownClearVisitation(graph);
             ownClearExecution(graph);
